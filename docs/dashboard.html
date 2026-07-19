@@ -186,7 +186,8 @@
       <div class="tile"><div class="n">215×</div><div class="l">1,000 models from one state</div><div class="s">measured cpu-s vs SGD-per-variant</div></div>
       <div class="tile"><div class="n">+21.2<span style="font-size:18px">pts</span></div><div class="l">vs Adam-trained federated LoRA</div><div class="s">AG News · non-IID α=0.1</div></div>
       <div class="tile"><div class="n">2×10⁻¹⁰</div><div class="l">distributed ≡ centralized</div><div class="s">real MLM features · EXACT-FROZEN</div></div>
-      <div class="tile"><div class="n">15/15</div><div class="l">experiments passing</div><div class="s">8 reference + 7 real-data programs</div></div>
+      <div class="tile"><div class="n">16/16</div><div class="l">experiments passing</div><div class="s">8 reference + 8 real-data programs</div></div>
+      <div class="tile"><div class="n">&minus;81%</div><div class="l">fleet lifetime energy, 24 mo</div><div class="s">simulated over measured micro-costs</div></div>
     </div>
   </header>
 
@@ -301,6 +302,63 @@
 
   <section>
     <div class="sec-head">
+      <h2>Learning that costs O(new), forever</h2>
+      <span class="sec-note">real-R7 · 6 drifting periods (70% class skew) · deletion event · measured cpu-s</span>
+    </div>
+    <p class="lede">
+      The incrementality pillar of the paradigm: the state touches each raw example <strong>once,
+      ever</strong>, stays bit-identical to full retraining at every period, and never forgets.
+      The cheap alternative &mdash; SGD warm-start on new data &mdash; forgets old distributions
+      (0.482 vs 0.770); the safe alternative &mdash; replay retraining &mdash; pays costs that grow
+      with all of history (&times;6.0 by period six, vs &times;1.6 flat). Deleting a period&rsquo;s
+      contributor: one subtraction, 269&times; cheaper than replay, exact to 1e-11.
+    </p>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--accent)"></span>RTLM-N incremental state</span>
+      <span><span class="sw" style="background:var(--baseline)"></span>replay / SGD baseline</span>
+    </div>
+    <div class="row2">
+      <div class="card">
+        <h3>Cumulative learning compute</h3>
+        <div class="sub">measured cpu-s · replay grows with history, the state does not</div>
+        <div class="chart-wrap"><div id="ch-r7cost"></div></div>
+      </div>
+      <div class="card">
+        <h3>Accuracy across drift</h3>
+        <div class="sub">full test set · warm-start SGD forgets, the state cannot</div>
+        <div class="chart-wrap"><div id="ch-r7acc"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>What it means at fleet scale</h2>
+      <span class="sec-note">simulation over measured micro-costs · 1,000 nodes &times; 200 tasks/day &times; 24 months · EMPIRICAL-NEURAL</span>
+    </div>
+    <p class="lede">
+      Measured per-operation costs (state folds, rematerializations, refresh-vs-materialize ratio,
+      escalation decay, migration recovery) projected onto a declared workload model. Backbone
+      upgrades every 6 months cause the small bumps &mdash; the representation bridge preserves 78%
+      of accreted skill, so the fleet re-learns in weeks, not from scratch.
+      <strong>2,028 &rarr; 378 kWh (&minus;81%)</strong> vs teacher-always;
+      <strong>&minus;51%</strong> vs a well-tuned static cascade. Per-task teacher/edge joules are
+      declared industry estimates; the shape, not the wattage, is the claim.
+    </p>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--central)"></span>teacher-always</span>
+      <span><span class="sw" style="background:var(--baseline)"></span>static cascade</span>
+      <span><span class="sw" style="background:var(--accent)"></span>RTLM-N accretion</span>
+    </div>
+    <div class="card">
+      <h3>Fleet energy per month</h3>
+      <div class="sub">kWh · bumps = backbone upgrades, partially absorbed by migration</div>
+      <div class="chart-wrap"><div id="ch-fleet"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
       <h2>Both experimental programs</h2>
       <span class="sec-note">python -m rtlm_n.benchmarks.run_all · python -m rtlm_n.benchmarks.real_agnews</span>
     </div>
@@ -316,6 +374,8 @@
       <tr><td class="num">7</td><td>Backbone migration</td><td><span class="chip emp">EMPIRICAL-NEURAL</span></td><td>87% of reset→retrain gap recovered</td></tr>
       <tr><td class="num">R0–R5</td><td>Real-data program — AG News, torch, Adam baselines, measured cpu-s</td><td><span class="chip exact">6/6 PASS</span></td><td>everything above re-proven on real text with real competitors</td></tr>
       <tr><td class="num">R6</td><td>Iterated Gauss–Newton — distributed 2nd-order, per-round exact merge</td><td><span class="chip lin">LINEARIZED-BOUNDED</span></td><td>internal-only: 0.566 → 0.710 · beats true federated internal LoRA (0.648) · 4.5pts from centralized backprop (0.755) · error per round 0.26 → 0.14</td></tr>
+      <tr><td class="num">R7</td><td>Continual incrementality — O(new) learning, zero forgetting, exact deletion</td><td><span class="chip exact">EXACT-FROZEN</span></td><td>≡ retraining every period (6e-11) · warm-start forgets (0.482 vs 0.770) · replay cost ×6.0 vs flat · deletion 269× cheaper</td></tr>
+      <tr><td class="num">F</td><td>Fleet lifetime study — 1,000 nodes, 24 months, measured micro-costs</td><td><span class="chip emp">EMPIRICAL-NEURAL</span></td><td>−81% vs teacher-always, −51% vs tuned static cascade; assumptions declared with provenance</td></tr>
     </table></div>
   </section>
 
@@ -426,6 +486,37 @@
     bindTips(el);
   }
 
+  // ---- multi-series line chart ----------------------------------------
+  function lines(id, series, ymax, fmt, xl0, xl1) {
+    const W = 470, H = 170, L = 46, R = 14, T = 12, B = 26;
+    const pw = W - L - R, ph = H - T - B;
+    const n = series[0].ys.length;
+    const X = (i) => L + (i / (n - 1)) * pw;
+    const Y = (v) => T + ph - (v / ymax) * ph;
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img">`;
+    [0, 0.5, 1].forEach((f) => {
+      const y = T + ph - f * ph;
+      s += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}" stroke="${css("--grid")}" stroke-width="1"></line>`;
+      s += `<text x="${L - 7}" y="${y + 4}" text-anchor="end" font-size="10" fill="${css("--ink-3")}">${fmt(f * ymax)}</text>`;
+    });
+    series.forEach((sr) => {
+      const col = css(sr.color);
+      const pts = sr.ys.map((v, i) => `${X(i)},${Y(v)}`).join(" ");
+      s += `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"></polyline>`;
+      sr.ys.forEach((v, i) => {
+        s += `<circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="${css("--panel")}" stroke="${col}" stroke-width="1.8" data-tip="${sr.name} · ${i}: ${fmt(v)}"></circle>`;
+      });
+      const lastY = Y(sr.ys[n - 1]);
+      s += `<text x="${W - R}" y="${lastY + (sr.dy || 0) - 6}" text-anchor="end" font-size="10.5" font-weight="700" fill="${css("--ink")}">${fmt(sr.ys[n - 1])}</text>`;
+    });
+    s += `<text x="${L}" y="${H - 6}" font-size="10" fill="${css("--ink-3")}">${xl0}</text>`;
+    s += `<text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="10" fill="${css("--ink-3")}">${xl1}</text>`;
+    s += "</svg>";
+    const el = document.getElementById(id);
+    el.innerHTML = s;
+    bindTips(el);
+  }
+
   // ---- migration ladder ------------------------------------------------
   function ladder(id) {
     const W = 940, H = 120, L = 30, R = 30, y = 58, x0 = 0.15, x1 = 0.65;
@@ -477,6 +568,19 @@
       { k: "Federated internal LoRA", v: 0.648 },
       { k: "Head only (floor)", v: 0.566, ref: true },
     ], 0.8, (v) => v.toFixed(3), 196);
+    lines("ch-r7cost", [
+      { name: "replay retrain", ys: [0.98,2.99,5.92,10.02,15.29,21.15], color: "--baseline" },
+      { name: "RTLM-N incremental", ys: [0.66,1.77,2.92,4.08,5.22,6.27], color: "--accent", dy: 14 },
+    ], 24, (v) => v.toFixed(1), "period 0", "period 5");
+    lines("ch-r7acc", [
+      { name: "RTLM-N (== retraining)", ys: [0.559,0.696,0.746,0.770,0.770,0.770], color: "--accent" },
+      { name: "SGD warm-start on new only", ys: [0.551,0.538,0.369,0.527,0.545,0.482], color: "--baseline", dy: 14 },
+    ], 0.9, (v) => v.toFixed(2), "period 0", "period 5");
+    lines("ch-fleet", [
+      { name: "teacher-always", ys: [83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3,83.3], color: "--central" },
+      { name: "static cascade", ys: [31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7,31.7], color: "--baseline" },
+      { name: "RTLM-N accretion", ys: [52.6,26.2,16.5,12.9,11.6,11.1,20.1,14.3,12.1,11.3,11.0,10.9,20.1,14.2,12.1,11.3,11.0,10.9,20.1,14.2,12.1,11.3,11.0,10.9], color: "--accent", dy: 14 },
+    ], 90, (v) => v.toFixed(0), "month 1", "month 24");
   }
   render();
   new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });

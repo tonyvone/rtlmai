@@ -1,0 +1,129 @@
+{
+  "experiment": "real-R7-continual-incrementality",
+  "claims": [
+    {
+      "name": "incremental state == full retraining at EVERY period",
+      "guarantee": "EXACT-FROZEN",
+      "passed": true,
+      "evidence": {
+        "value": 6.372397054477119e-11,
+        "threshold": 1e-08
+      },
+      "note": "max |dW| across 6 periods; zero forgetting by algebra"
+    },
+    {
+      "name": "cheap SGD warm-start forgets under drift; the state does not",
+      "guarantee": "EMPIRICAL-NEURAL",
+      "passed": true,
+      "evidence": {
+        "value": 0.28833333333333333,
+        "threshold": 0.05
+      },
+      "note": "final acc: rtlmn=0.770 sgd-new-only=0.482 (70%-skewed periods)"
+    },
+    {
+      "name": "per-period cost: replay grows with history, RTLM-N does not",
+      "guarantee": "EMPIRICAL-NEURAL",
+      "passed": true,
+      "evidence": {
+        "value": 3.7586005830903373,
+        "threshold": 1.5
+      },
+      "note": "period-cost growth over 6 periods: rtlmn x1.59 vs replay x5.98"
+    },
+    {
+      "name": "cumulative measured compute vs replay retraining (x cheaper)",
+      "guarantee": "EMPIRICAL-NEURAL",
+      "passed": true,
+      "evidence": {
+        "value": 3.3732057416267884,
+        "threshold": 1.5
+      },
+      "note": "cumulative cpu-s: rtlmn=6.3 replay=21.1 sgd-all(features free)=32.2"
+    },
+    {
+      "name": "deletion: exact and cheap (vs replay-without-the-data)",
+      "guarantee": "EXACT-FROZEN",
+      "passed": true,
+      "evidence": {
+        "value": 269.4999999999579,
+        "threshold": 10.0
+      },
+      "note": "|dW|=1.28e-11; cpu-s: subtract+solve=0.040 vs replay=10.8"
+    }
+  ],
+  "curves": {
+    "rtlmn_acc": [
+      0.5593333333333333,
+      0.696,
+      0.7456666666666667,
+      0.7696666666666667,
+      0.77,
+      0.77
+    ],
+    "replay_acc": [
+      0.5593333333333333,
+      0.696,
+      0.7456666666666667,
+      0.7696666666666667,
+      0.77,
+      0.77
+    ],
+    "sgd_all_acc": [
+      0.5506666666666666,
+      0.6993333333333334,
+      0.7453333333333333,
+      0.77,
+      0.7683333333333333,
+      0.769
+    ],
+    "sgd_new_acc": [
+      0.5506666666666666,
+      0.538,
+      0.369,
+      0.5273333333333333,
+      0.5453333333333333,
+      0.4816666666666667
+    ],
+    "rtlmn_cpu": [
+      0.6600000000000001,
+      1.1099999999999994,
+      1.1499999999999986,
+      1.1600000000000001,
+      1.1400000000000006,
+      1.0500000000000114
+    ],
+    "replay_cpu": [
+      0.9800000000000004,
+      2.01,
+      2.9299999999999997,
+      4.100000000000001,
+      5.269999999999996,
+      5.859999999999999
+    ],
+    "sgd_all_cpu": [
+      2.54,
+      2.960000000000001,
+      3.710000000000001,
+      4.619999999999997,
+      6.560000000000002,
+      11.849999999999994
+    ],
+    "sgd_new_cpu": [
+      1.0700000000000003,
+      1.1799999999999997,
+      1.1400000000000006,
+      1.1099999999999994,
+      1.1099999999999994,
+      1.269999999999996
+    ],
+    "equivalence": [
+      0.0,
+      1.900046786573739e-11,
+      9.63723545410744e-12,
+      1.3252399178043106e-11,
+      6.372397054477119e-11,
+      4.3171646813000564e-11
+    ]
+  }
+}

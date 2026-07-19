@@ -165,6 +165,29 @@ platform exposes it):
 | R4 | Internal adapter with **exact autograd Jacobians** (`torch.func.jacrev`): 8.7% coordinate recovery error, linearization error 0.085 reported |
 | R5 | Head state transported to an independently-pretrained, narrower backbone recovers **78%** of the reset→retrain gap (EMPIRICAL-NEURAL, bridge residual reported) |
 | R6 | **Iterated Gauss–Newton** (`real_internal.py`): distributed re-linearize → accumulate → merge → step with Levenberg–Marquardt trust region. Internal-only adaptation (head fixed): base 0.566 → one-shot 0.666 → **iterated 0.710**, beating TRUE federated internal LoRA (Adam, backprop, non-IID) at 0.648 and within 4.5 pts of centralized backprop LoRA (0.755) — from a fixed 48-coordinate mergeable subspace vs 1,536 free parameters; per-round linearization error measured (0.26 → 0.14) |
+| R7 | **Continual incrementality** (`real_continual.py`): 6 drifting periods (70% class skew). The state touches each example **once, ever**, stays ≡ full retraining every period (6e-11), and never forgets; SGD warm-start on new data forgets (0.482 vs **0.770**); replay retraining's per-period cost grows ×6.0 while RTLM-N stays flat; mid-stream deletion is **269× cheaper** than replay and exact |
+
+**Fleet lifetime study** (`fleet_study.py`, EMPIRICAL-NEURAL simulation over
+measured micro-costs, all assumptions printed with provenance): 1,000 nodes ×
+200 tasks/day × 24 months with 6-monthly backbone upgrades → **2,028 → 378 kWh
+(−81%)** vs teacher-always and **−51%** vs a well-tuned static cascade, with
+migration (R5) absorbing most of each upgrade's re-learning cost.
+
+## The paradigm case
+
+Three pillars, each a complexity-class argument backed by a measured result:
+
+1. **Amortization** — learning cost is paid once per *experience*, not once
+   per *model*: 1,000 models from one state at 215× less measured compute (R2).
+2. **Accretion** — inference migrates permanently from central to edge:
+   escalation and energy per task decline while quality rises (exp5/R3), and
+   the state survives backbone replacement (R5, 78% recovered).
+3. **Incrementality** — learning cost is O(new experience), with zero
+   forgetting and exact deletion (R7). Trajectory-based training offers any
+   two of {cheap updates, no forgetting, provable deletion}; the sufficient
+   state gives all three by construction.
+
+See `docs/PARADIGM.md` for the full claims-to-evidence ledger.
 
 The canonical basis that wins R1 is the spec's *teacher-residual
 subspace*: leading input directions from the feature-residual
