@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rtlm-n"
+version = "0.1.0"
+description = "RTLM-N: Distributed Neural Intelligence State - compact mergeable neural learning states that materialize many models"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+include = ["rtlm_n*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
