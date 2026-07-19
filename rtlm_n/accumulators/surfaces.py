@@ -88,6 +88,10 @@ def projected_jacobian(
     forward passes per batch (r is small by construction).
     """
     layer = int(surface.split(":")[1])
+    m = basis.matrices(surface)
+    if hasattr(model, "jacobian_c"):
+        # torch backbones provide exact vectorized autograd Jacobians
+        return model.jacobian_c(tokens, m["U"], m["V"], layer, head_W)
     ru, rv = basis.ru, basis.rv
     r = ru * rv
     B = tokens.shape[0]

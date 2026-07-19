@@ -132,8 +132,20 @@ def build_basis(
         if calibration_tokens is None:
             raise ValueError(f"{method} basis requires calibration_tokens")
         H = model.forward(calibration_tokens)
-        _, _, Vt = np.linalg.svd(H - H.mean(axis=0), full_matrices=False)
-        V_head = Vt[:rv].T
+        Hc = H - H.mean(axis=0)
+        _, _, Vt = np.linalg.svd(Hc, full_matrices=False)
+        if method == "teacher-residual" and calibration_residuals is not None:
+            # The optimal input subspace of a linear correction is spanned
+            # by the feature-residual cross-covariance (rank <= k). Lead
+            # with those directions, fill the remaining rank with top
+            # activation-variance directions, orthonormalize.
+            Cxy = Hc.T @ (calibration_residuals - calibration_residuals.mean(axis=0))
+            Uc, _, _ = np.linalg.svd(Cxy, full_matrices=False)
+            stacked = np.concatenate([Uc, Vt[: rv].T], axis=1)
+            Q, _ = np.linalg.qr(stacked)
+            V_head = Q[:, :rv]
+        else:
+            V_head = Vt[:rv].T
     else:
         V_head = orthonormal_columns(rng, d, rv)
     surfaces["head"] = {"U": U_head, "V": V_head}

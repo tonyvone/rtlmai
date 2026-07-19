@@ -170,10 +170,12 @@ class EdgeNode:
         objective_id: str,
         task_family: str = "default",
         t: float = 0.0,
+        h: Optional[np.ndarray] = None,
     ) -> NeuralIntelligenceState:
         """Stage C: evidence for C in the canonical low-rank head update
         W = W0 + U C V^T. All nodes share U, V; only C-coordinates travel."""
-        h = self.extract_features(tokens)
+        if h is None:
+            h = self.extract_features(tokens)
         acc = lowrank_head_stats(self.basis, h, targets, W0)
         self.meter.charge_flops("state_build", 4.0 * h.size * self.basis.rv, self.device)
         return self._leaf(
