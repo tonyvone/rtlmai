@@ -130,3 +130,34 @@ def test_mlm_pretraining_improves_features():
     assert head_acc(trained) >= head_acc(rand) - 0.02
     # and the MLM loss must not be degenerate-zero (target-leak regression)
     assert trained.base_model_id != rand.base_model_id
+
+
+def test_iterated_gauss_newton_escapes_band(backbone):
+    """A large internal shift sits outside the one-shot linearization band;
+    iterated re-linearization must recover it better, with the per-round
+    error measured and declining."""
+    from rtlm_n.core.hashing import KeyRegistry
+    from rtlm_n.materialization.iterated import iterated_gauss_newton
+
+    model, rng = backbone
+    basis = build_basis(model, "random-orthogonal", seed=9, ru=2, rv=3, n_classes=3,
+                        adapter_layers=(1,))
+    C_true = 1.6 * rng.standard_normal((2, 3))  # deliberately far
+    delta = adapter_delta(basis, "mlp:1", C_true)
+    W_head = rng.standard_normal((3, 32))
+    toks = _tokens(rng, 200)
+    targets = model.forward(toks, mlp_deltas={1: delta}) @ W_head.T
+
+    keys = KeyRegistry()
+    node_data = [("a", toks[:100], targets[:100]), ("b", toks[100:], targets[100:])]
+    one = iterated_gauss_newton(model, basis, "mlp:1", node_data, W_head, keys,
+                                rounds=1, probe_tokens=toks[:40], objective_prefix="o")
+    it = iterated_gauss_newton(model, basis, "mlp:1", node_data, W_head, keys,
+                               rounds=4, probe_tokens=toks[:40], objective_prefix="i")
+
+    err_one = np.linalg.norm(one.c - C_true.ravel())
+    err_it = np.linalg.norm(it.c - C_true.ravel())
+    assert err_it < err_one * 0.7, f"iteration did not improve: {err_one} -> {err_it}"
+    lin_errs = [h.linearization_error for h in it.history]
+    assert all(np.isfinite(lin_errs)), "linearization error must be measured every round"
+    assert lin_errs[-1] < lin_errs[0], f"trust region not contracting: {lin_errs}"

@@ -70,6 +70,13 @@ demotes the label, non-finite or ill-conditioned states are refused.
   f(θ+Pc, x) ≈ f(θ, x) + J_P(x)c inside transformer MLP layers;
   Gauss-Newton states G = Σ JᵀJ, g = Σ Jᵀr solved in c-space.
   `LINEARIZED-BOUNDED` with measured error.
+- **Stage D+ — iterated Gauss–Newton** (`materialization/iterated.py`):
+  escape the one-shot band by re-linearizing at each materialized point —
+  distributed second-order optimization where every round communicates one
+  compact state per node, merges exactly within the round
+  (Levenberg–Marquardt trust region: λ_eff = λ + μ·tr(G)/dim), and reports
+  its linearization error. Rounds are separate objectives: states from
+  different linearization points are never merged together.
 
 ## State operations
 
@@ -157,6 +164,7 @@ platform exposes it):
 | R3 | Cascade on the real workload: escalation declines, quality rises 0.62 → 0.86, energy/task declines |
 | R4 | Internal adapter with **exact autograd Jacobians** (`torch.func.jacrev`): 8.7% coordinate recovery error, linearization error 0.085 reported |
 | R5 | Head state transported to an independently-pretrained, narrower backbone recovers **78%** of the reset→retrain gap (EMPIRICAL-NEURAL, bridge residual reported) |
+| R6 | **Iterated Gauss–Newton** (`real_internal.py`): distributed re-linearize → accumulate → merge → step with Levenberg–Marquardt trust region. Internal-only adaptation (head fixed): base 0.566 → one-shot 0.666 → **iterated 0.710**, beating TRUE federated internal LoRA (Adam, backprop, non-IID) at 0.648 and within 4.5 pts of centralized backprop LoRA (0.755) — from a fixed 48-coordinate mergeable subspace vs 1,536 free parameters; per-round linearization error measured (0.26 → 0.14) |
 
 The canonical basis that wins R1 is the spec's *teacher-residual
 subspace*: leading input directions from the feature-residual

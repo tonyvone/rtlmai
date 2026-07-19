@@ -1,0 +1,65 @@
+{
+  "experiment": "real-R6-iterated-gn-vs-internal-lora",
+  "claims": [
+    {
+      "name": "iteration escapes the one-shot linearization band",
+      "guarantee": "LINEARIZED-BOUNDED",
+      "passed": true,
+      "evidence": {
+        "value": 0.04399999999999993,
+        "threshold": 0.0
+      },
+      "note": "one-shot=0.666 iterated(3)=0.710"
+    },
+    {
+      "name": "per-round linearization error is measured and shrinks",
+      "guarantee": "LINEARIZED-BOUNDED",
+      "passed": true,
+      "evidence": {
+        "value": -0.11843031580374433,
+        "threshold": 0.0
+      },
+      "note": "errors/round: 0.256, 0.307, 0.138"
+    },
+    {
+      "name": "canonical GN state beats TRUE federated internal LoRA (non-IID)",
+      "guarantee": "EMPIRICAL-NEURAL",
+      "passed": true,
+      "evidence": {
+        "value": 0.061999999999999944,
+        "threshold": 0.0
+      },
+      "note": "iterated-gn=0.710 federated-internal-lora=0.648"
+    },
+    {
+      "name": "internal surface improves over fixed head",
+      "guarantee": "EMPIRICAL-NEURAL",
+      "passed": true,
+      "evidence": {
+        "value": 0.14400000000000002,
+        "threshold": 0.0
+      },
+      "note": "base=0.566"
+    },
+    {
+      "name": "gap to TRUE centralized internal LoRA (reported, not gated)",
+      "guarantee": "EMPIRICAL-NEURAL",
+      "passed": true,
+      "evidence": {
+        "value": -0.04533333333333334,
+        "threshold": -1.0
+      },
+      "note": "centralized-internal-lora=0.755 (Adam, backprop, adaptive subspace)"
+    },
+    {
+      "name": "measured cpu-s: iterated GN vs federated internal LoRA (ratio)",
+      "guarantee": "EMPIRICAL-NEURAL",
+      "passed": true,
+      "evidence": {
+        "value": 0.2629413964421176,
+        "threshold": 0.0
+      },
+      "note": "{\"R6_rtlmn_oneshot_gn\": 68.14, \"R6_rtlmn_iterated_gn\": 187.19, \"R6_internal_lora_central\": 10.95, \"R6_internal_lora_federated\": 49.22}"
+    }
+  ]
+}

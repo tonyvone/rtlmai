@@ -141,28 +141,50 @@ class TorchTransformer(nn.Module):
 
     # ----------------------------------------------------------- jacobian
     def jacobian_c(
-        self, tokens: np.ndarray, U: np.ndarray, V: np.ndarray, layer: int, head_W: np.ndarray
+        self,
+        tokens: np.ndarray,
+        U: np.ndarray,
+        V: np.ndarray,
+        layer: int,
+        head_W: np.ndarray,
+        c0: Optional[np.ndarray] = None,
     ) -> tuple:
-        """Exact d logits / d c at c = 0 via autograd, in the canonical
-        basis Delta W1 = U C V^T. Returns (logits0 (B,k), J (B,k,r))."""
+        """Exact d logits / d c at c = c0 via autograd, in the canonical
+        basis Delta W1 = U (C0 + C) V^T. Returns (logits at c0 (B,k),
+        J (B,k,r)). c0=None linearizes at the reference model; passing the
+        previously materialized coordinates gives the next Gauss-Newton
+        linearization point."""
         t = torch.as_tensor(np.asarray(tokens), dtype=torch.long)
         Ut = torch.as_tensor(U, dtype=torch.float32)
         Vt = torch.as_tensor(V, dtype=torch.float32)
         Wh = torch.as_tensor(head_W, dtype=torch.float32)
         ru, rv = Ut.shape[1], Vt.shape[1]
+        C0 = torch.zeros(ru, rv) if c0 is None else torch.as_tensor(
+            np.asarray(c0).reshape(ru, rv), dtype=torch.float32
+        )
         c = torch.zeros(ru, rv, requires_grad=True)
 
         def logits_fn(cmat: torch.Tensor) -> torch.Tensor:
-            delta = Ut @ cmat @ Vt.T
+            delta = Ut @ (C0 + cmat) @ Vt.T
             return self._encode(t, {layer: delta}) @ Wh.T
 
         with torch.no_grad():
             logits0 = logits_fn(c.detach())
-        # vectorized exact Jacobian: (B, k, ru, rv) in one reverse sweep set
-        J4 = torch.func.jacrev(logits_fn)(c.detach())
+        # vectorized exact Jacobian, chunked over the batch to bound memory
         B, k = logits0.shape
-        J = J4.reshape(B, k, ru * rv)
-        return logits0.double().numpy(), J.double().numpy()
+        J = np.empty((B, k, ru * rv))
+        chunk = 128
+        for lo in range(0, B, chunk):
+            hi = min(lo + chunk, B)
+            tc = t[lo:hi]
+
+            def logits_chunk(cmat: torch.Tensor, tc=tc) -> torch.Tensor:
+                delta = Ut @ (C0 + cmat) @ Vt.T
+                return self._encode(tc, {layer: delta}) @ Wh.T
+
+            J4 = torch.func.jacrev(logits_chunk)(c.detach())
+            J[lo:hi] = J4.reshape(hi - lo, k, ru * rv).double().numpy()
+        return logits0.double().numpy(), J
 
     # ------------------------------------------------------------- costing
     @property

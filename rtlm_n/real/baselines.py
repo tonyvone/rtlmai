@@ -121,6 +121,43 @@ def federated_lora_avg(
     return W0 + np.mean(deltas, axis=0)
 
 
+def train_internal_lora(
+    model,
+    tokens: np.ndarray,
+    targets: np.ndarray,
+    head_W: np.ndarray,
+    layer: int,
+    rank: int = 4,
+    steps: int = 250,
+    lr: float = 1e-2,
+    batch: int = 128,
+    seed: int = 0,
+) -> np.ndarray:
+    """TRUE internal LoRA: Delta W1 = B A inside a transformer MLP layer,
+    A/B Adam-trained by backprop through the frozen backbone, per-run
+    random init (so independent runs live in misaligned subspaces, as in
+    real federated LoRA). Returns Delta W1 (d_ff, d_model)."""
+    torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    d, dff = model.d_model, model.d_ff
+    A = nn.Parameter(torch.randn(rank, d) * 0.05)
+    B = nn.Parameter(torch.zeros(dff, rank))
+    Wh = _to_t(head_W)
+    t_all = torch.as_tensor(np.asarray(tokens), dtype=torch.long)
+    y_all = _to_t(targets)
+    opt = torch.optim.Adam([A, B], lr=lr)
+    n = len(tokens)
+    for _ in range(steps):
+        idx = torch.as_tensor(rng.integers(0, n, size=min(batch, n)))
+        delta = B @ A
+        h = model._encode(t_all[idx], {layer: delta})
+        loss = nn.functional.mse_loss(h @ Wh.T, y_all[idx])
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+    return (B @ A).detach().double().numpy()
+
+
 def distill_head(
     h: np.ndarray,
     teacher_logits: np.ndarray,

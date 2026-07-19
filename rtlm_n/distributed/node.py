@@ -200,13 +200,17 @@ class EdgeNode:
         objective_id: str,
         task_family: str = "default",
         t: float = 0.0,
+        c0: Optional[np.ndarray] = None,
     ) -> NeuralIntelligenceState:
         """Stage D: projected Gauss-Newton evidence for an internal adapter.
 
-        residual r = target - f(theta, x); J = d logits / d c in the shared
-        canonical c-space. LINEARIZED-BOUNDED by construction.
+        residual r = target - f(theta + P c0, x); J = d logits / d c at c0
+        in the shared canonical c-space. LINEARIZED-BOUNDED by construction.
+        Iterated Gauss-Newton passes the current linearization point c0 -
+        callers MUST scope objective_id per round, because states linearized
+        at different points are not mergeable evidence.
         """
-        logits0, J = projected_jacobian(self.model, self.basis, surface, tokens, head_W)
+        logits0, J = projected_jacobian(self.model, self.basis, surface, tokens, head_W, c0=c0)
         r_dim = J.shape[2]
         # (r+1) forward passes for the differencing
         self.meter.charge_flops(

@@ -80,25 +80,29 @@ def projected_jacobian(
     tokens: np.ndarray,
     head_W: np.ndarray,
     eps: float = 1e-5,
+    c0: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """J_P(x) = d logits / d c at c = 0 for an internal MLP adapter surface.
+    """J_P(x) = d logits / d c at c = c0 for an internal MLP adapter surface.
 
-    Returns (logits0 (B,k), J (B,k,r)) with r = ru*rv. Computed by exact
-    forward differencing along each canonical direction; cost is r+1
-    forward passes per batch (r is small by construction).
+    Returns (logits at c0 (B,k), J (B,k,r)) with r = ru*rv. c0 defaults to
+    the reference model; iterated Gauss-Newton passes the previously
+    materialized coordinates to re-linearize there. Computed by exact
+    forward differencing along each canonical direction (r+1 forward
+    passes) or delegated to the backbone's autograd Jacobian when exposed.
     """
     layer = int(surface.split(":")[1])
     m = basis.matrices(surface)
     if hasattr(model, "jacobian_c"):
         # torch backbones provide exact vectorized autograd Jacobians
-        return model.jacobian_c(tokens, m["U"], m["V"], layer, head_W)
+        return model.jacobian_c(tokens, m["U"], m["V"], layer, head_W, c0=c0)
     ru, rv = basis.ru, basis.rv
     r = ru * rv
     B = tokens.shape[0]
     k = head_W.shape[0]
+    C0 = np.zeros((ru, rv)) if c0 is None else np.asarray(c0).reshape(ru, rv)
 
     def logits_at(c: np.ndarray) -> np.ndarray:
-        C = c.reshape(ru, rv)
+        C = C0 + c.reshape(ru, rv)
         delta = adapter_delta(basis, surface, C)
         h = model.forward(tokens, mlp_deltas={layer: delta})
         return h @ head_W.T
@@ -127,18 +131,24 @@ def linearization_error(
     tokens: np.ndarray,
     head_W: np.ndarray,
     c_star: np.ndarray,
+    c0: Optional[np.ndarray] = None,
 ) -> float:
-    """Measured relative error of the linear model at the materialized c*.
+    """Measured relative error of the linearization at c0, evaluated at the
+    materialized step dc = c_star (relative to c0):
 
-    || f(c*) - (f(0) + J c*) || / || f(c*) - f(0) ||, evaluated with real
-    forward passes. Required reporting for every LINEARIZED-BOUNDED result.
+        || f(c0+dc) - (f(c0) + J(c0) dc) || / || f(c0+dc) - f(c0) ||
+
+    with real forward passes. Required reporting for every
+    LINEARIZED-BOUNDED result; iterated Gauss-Newton reports it per round.
     """
     layer = int(surface.split(":")[1])
-    C = c_star.reshape(basis.ru, basis.rv)
+    ru, rv = basis.matrices(surface)["U"].shape[1], basis.matrices(surface)["V"].shape[1]
+    C0 = np.zeros((ru, rv)) if c0 is None else np.asarray(c0).reshape(ru, rv)
+    C = C0 + c_star.reshape(ru, rv)
     delta = adapter_delta(basis, surface, C)
     h_true = model.forward(tokens, mlp_deltas={layer: delta})
     logits_true = h_true @ head_W.T
-    logits0, J = projected_jacobian(model, basis, surface, tokens, head_W)
+    logits0, J = projected_jacobian(model, basis, surface, tokens, head_W, c0=C0.ravel())
     logits_lin = logits0 + np.einsum("bkr,r->bk", J, c_star)
     num = float(np.linalg.norm(logits_true - logits_lin))
     den = float(np.linalg.norm(logits_true - logits0)) + 1e-12
