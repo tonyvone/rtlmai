@@ -1,0 +1,458 @@
+<title>RTLM-N — Evidence Ledger</title>
+<style>
+  :root {
+    --paper: #F6F7F5;
+    --panel: #FFFFFF;
+    --panel-edge: #E2E6E2;
+    --ink: #182320;
+    --ink-2: #4A5854;
+    --ink-3: #7C8A85;
+    --accent: #0A8F72;          /* state teal — RTLM-N, edge */
+    --accent-soft: #0A8F7218;
+    --baseline: #5E63B8;        /* slate — SGD baselines */
+    --central: #B45309;         /* central amber — datacenter cost */
+    --grid: #18232012;
+    --pass-bg: #0A8F7214;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "DejaVu Sans Mono", Menlo, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #101514; --panel: #171D1B; --panel-edge: #242C29;
+      --ink: #E7EDEA; --ink-2: #A9B6B1; --ink-3: #75827D;
+      --accent: #22A583; --accent-soft: #22A58322;
+      --baseline: #7E84D6; --central: #CE7B2F;
+      --grid: #E7EDEA14; --pass-bg: #22A58320;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #101514; --panel: #171D1B; --panel-edge: #242C29;
+    --ink: #E7EDEA; --ink-2: #A9B6B1; --ink-3: #75827D;
+    --accent: #22A583; --accent-soft: #22A58322;
+    --baseline: #7E84D6; --central: #CE7B2F;
+    --grid: #E7EDEA14; --pass-bg: #22A58320;
+  }
+  :root[data-theme="light"] {
+    --paper: #F6F7F5; --panel: #FFFFFF; --panel-edge: #E2E6E2;
+    --ink: #182320; --ink-2: #4A5854; --ink-3: #7C8A85;
+    --accent: #0A8F72; --accent-soft: #0A8F7218;
+    --baseline: #5E63B8; --central: #B45309;
+    --grid: #18232012; --pass-bg: #0A8F7214;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 48px 28px 72px; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600;
+  }
+  h1 {
+    font-size: clamp(30px, 4.5vw, 44px); font-weight: 800; letter-spacing: -0.02em;
+    line-height: 1.08; margin: 10px 0 14px; text-wrap: balance;
+  }
+  .thesis { max-width: 62ch; color: var(--ink-2); font-size: 16.5px; margin: 0 0 8px; }
+  .thesis strong { color: var(--ink); }
+
+  /* pipeline strip */
+  .pipe {
+    display: flex; align-items: stretch; gap: 0; margin: 34px 0 8px;
+    overflow-x: auto; padding-bottom: 6px;
+  }
+  .pipe-step {
+    flex: 1 1 0; min-width: 118px; padding: 12px 14px;
+    border: 1px solid var(--panel-edge); background: var(--panel);
+    display: flex; flex-direction: column; gap: 4px; position: relative;
+  }
+  .pipe-step + .pipe-step { margin-left: 22px; }
+  .pipe-step + .pipe-step::before {
+    content: ""; position: absolute; left: -17px; top: 50%; width: 12px; height: 1.5px;
+    background: var(--ink-3);
+  }
+  .pipe-step + .pipe-step::after {
+    content: ""; position: absolute; left: -9px; top: 50%; margin-top: -3.25px;
+    border-left: 5px solid var(--ink-3); border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent;
+  }
+  .pipe-step.hot { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .pipe-k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+            text-transform: uppercase; color: var(--ink-3); }
+  .pipe-step.hot .pipe-k { color: var(--accent); }
+  .pipe-v { font-size: 13px; font-weight: 600; line-height: 1.3; }
+  .pipe-m { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .pipe-step { opacity: 0; transform: translateY(6px);
+                 animation: rise 0.45s ease-out forwards; }
+    .pipe-step:nth-child(1){animation-delay:.05s}.pipe-step:nth-child(2){animation-delay:.15s}
+    .pipe-step:nth-child(3){animation-delay:.25s}.pipe-step:nth-child(4){animation-delay:.35s}
+    .pipe-step:nth-child(5){animation-delay:.45s}.pipe-step:nth-child(6){animation-delay:.55s}
+    @keyframes rise { to { opacity: 1; transform: none; } }
+  }
+
+  /* stat tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+           gap: 14px; margin: 34px 0 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--panel-edge); padding: 16px 18px 14px; }
+  .tile .n { font-family: var(--mono); font-size: 30px; font-weight: 700;
+             letter-spacing: -0.02em; color: var(--accent);
+             font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .tile .l { font-size: 12.5px; font-weight: 600; margin-top: 4px; }
+  .tile .s { font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); margin-top: 2px; }
+
+  section { margin-top: 52px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+              border-bottom: 1px solid var(--panel-edge); padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; font-weight: 750; letter-spacing: -0.01em; margin: 0; }
+  .sec-note { font-size: 12.5px; color: var(--ink-3); font-family: var(--mono); }
+  p.lede { max-width: 68ch; color: var(--ink-2); margin: 0 0 18px; }
+
+  /* chart cards */
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 780px) { .row2 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--panel-edge); padding: 16px 18px 12px; }
+  .card h3 { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+  .card .sub { font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); margin-bottom: 12px; }
+  .legend { display: flex; gap: 16px; margin: 4px 0 10px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px;
+                 font-size: 11.5px; color: var(--ink-2); font-family: var(--mono); }
+  .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  svg text { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .chart-wrap { overflow-x: auto; }
+
+  /* pass gates */
+  .gates { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+  .gate { display: flex; gap: 10px; align-items: baseline; background: var(--pass-bg);
+          border: 1px solid var(--panel-edge); padding: 8px 12px; font-size: 12.5px; }
+  .gate .no { font-family: var(--mono); color: var(--accent); font-weight: 700; font-size: 11px; }
+  .gate .ok { margin-left: auto; font-family: var(--mono); color: var(--accent);
+              font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+  /* tables */
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+       text-transform: uppercase; color: var(--ink-3); font-weight: 600;
+       padding: 6px 12px 6px 0; border-bottom: 1px solid var(--panel-edge); }
+  td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .chip { font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em; padding: 2px 7px;
+          border-radius: 3px; white-space: nowrap; }
+  .chip.exact { background: var(--accent-soft); color: var(--accent); }
+  .chip.lin   { background: #5E63B822; color: var(--baseline); }
+  .chip.emp   { background: var(--grid); color: var(--ink-2); }
+  .tbl-wrap { overflow-x: auto; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+
+  /* tooltip */
+  #tip { position: fixed; pointer-events: none; z-index: 10; background: var(--ink);
+         color: var(--paper); font-family: var(--mono); font-size: 11.5px;
+         padding: 5px 9px; border-radius: 4px; opacity: 0; transition: opacity 0.1s;
+         white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { #tip { transition: none; } }
+
+  footer { margin-top: 64px; border-top: 1px solid var(--panel-edge); padding-top: 18px;
+           font-size: 12.5px; color: var(--ink-3); }
+  footer code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+  a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">RTLM-N · Distributed Neural Intelligence State</div>
+    <h1>Models become temporary executions of an intelligence state</h1>
+    <p class="thesis">
+      Edge nodes turn local experience into <strong>compact sufficient statistics</strong> inside a shared
+      canonical basis. States merge <strong>exactly</strong> — no raw data moves — and one merged state
+      <strong>materializes many models</strong>: per tenant, per power budget, per deletion request.
+      Every claim below is machine-checked and labeled with its guarantee class.
+    </p>
+
+    <div class="pipe" aria-label="RTLM-N pipeline">
+      <div class="pipe-step"><span class="pipe-k">01 · Edge</span><span class="pipe-v">Local data &amp; outcomes</span><span class="pipe-m">never leaves the node</span></div>
+      <div class="pipe-step"><span class="pipe-k">02 · Frozen model</span><span class="pipe-v">h = f<sub>θ</sub>(x)</span><span class="pipe-m">representation epoch</span></div>
+      <div class="pipe-step hot"><span class="pipe-k">03 · State</span><span class="pipe-v">H = Σ hhᵀ, R = Σ hrᵀ</span><span class="pipe-m">KB–MB · signed · mergeable</span></div>
+      <div class="pipe-step"><span class="pipe-k">04 · Merge</span><span class="pipe-v">H = Σᵢ Hᵢ</span><span class="pipe-m">exact · order-free · deletable</span></div>
+      <div class="pipe-step"><span class="pipe-k">05 · Factory</span><span class="pipe-v">W* = (H+λI)⁻¹R</span><span class="pipe-m">many models, one solve each</span></div>
+      <div class="pipe-step"><span class="pipe-k">06 · Deploy</span><span class="pipe-v">Inference accretes</span><span class="pipe-m">escalations become state</span></div>
+    </div>
+
+    <div class="tiles">
+      <div class="tile"><div class="n">215×</div><div class="l">1,000 models from one state</div><div class="s">measured cpu-s vs SGD-per-variant</div></div>
+      <div class="tile"><div class="n">+21.2<span style="font-size:18px">pts</span></div><div class="l">vs Adam-trained federated LoRA</div><div class="s">AG News · non-IID α=0.1</div></div>
+      <div class="tile"><div class="n">2×10⁻¹⁰</div><div class="l">distributed ≡ centralized</div><div class="s">real MLM features · EXACT-FROZEN</div></div>
+      <div class="tile"><div class="n">14/14</div><div class="l">experiments passing</div><div class="s">8 reference + 6 real-data programs</div></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <h2>Canonical state vs the crowded field</h2>
+      <span class="sec-note">real-R1 · AG News · 8 nodes · label-skew Dirichlet α=0.1 · all baselines Adam-trained</span>
+    </div>
+    <p class="lede">
+      Independently trained LoRA adapters live in accidental, misaligned subspaces — averaging them
+      interferes. RTLM-N fixes the coordinate system and merges <em>evidence</em>, then solves once.
+      Same frozen features for every method.
+    </p>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--accent)"></span>RTLM-N canonical state</span>
+      <span><span class="sw" style="background:var(--baseline)"></span>SGD baseline</span>
+    </div>
+    <div class="row2">
+      <div class="card">
+        <h3>Test accuracy</h3>
+        <div class="sub">4-class AG News · higher is better</div>
+        <div class="chart-wrap"><div id="ch-acc"></div></div>
+      </div>
+      <div class="card">
+        <h3>Measured training cost</h3>
+        <div class="sub">process cpu-seconds · lower is better</div>
+        <div class="chart-wrap"><div id="ch-cpu"></div></div>
+      </div>
+    </div>
+    <details><summary>data table</summary>
+      <div class="tbl-wrap"><table>
+        <tr><th>method</th><th>accuracy</th><th>cpu-s</th><th>merge/delete</th></tr>
+        <tr><td>RTLM-N canonical state (one-shot solve)</td><td class="num">0.750</td><td class="num">0.10</td><td>exact</td></tr>
+        <tr><td>Centralized LoRA · Adam</td><td class="num">0.742</td><td class="num">1.78</td><td>—</td></tr>
+        <tr><td>Base head (400 labels)</td><td class="num">0.663</td><td class="num">—</td><td>—</td></tr>
+        <tr><td>FedAvg heads · local Adam, averaged</td><td class="num">0.557</td><td class="num">3.97</td><td>approximate</td></tr>
+        <tr><td>Federated LoRA · per-node subspaces, averaged</td><td class="num">0.538</td><td class="num">4.67</td><td>approximate</td></tr>
+      </table></div>
+    </details>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Inference that absorbs its teacher</h2>
+      <span class="sec-note">exp5 reference program · 1,920 tasks · verified-workflow teacher</span>
+    </div>
+    <p class="lede">
+      Every escalation to the large model becomes residual state; the correction rematerializes
+      periodically. The system doesn't just route to the teacher — it <em>keeps</em> what the teacher
+      knew. Quality held at 1.000 across all windows. On the real AG News workload (real-R3):
+      escalation 0.36 → 0.30, quality 0.62 → 0.86, energy per task declining.
+    </p>
+    <div class="row2">
+      <div class="card">
+        <h3>Teacher escalation rate</h3>
+        <div class="sub">per 160-task window</div>
+        <div class="chart-wrap"><div id="ch-esc"></div></div>
+      </div>
+      <div class="card">
+        <h3>Energy per accepted task</h3>
+        <div class="sub">joules · teacher calls dominate</div>
+        <div class="chart-wrap"><div id="ch-joule"></div></div>
+      </div>
+    </div>
+    <details><summary>data table</summary>
+      <div class="tbl-wrap"><table>
+        <tr><th>window</th><th>escalation</th><th>J / task</th><th>accuracy</th><th>state samples</th></tr>
+        <tr><td class="num">0</td><td class="num">0.37</td><td class="num">0.0184</td><td class="num">1.000</td><td class="num">59</td></tr>
+        <tr><td class="num">3</td><td class="num">0.11</td><td class="num">0.0056</td><td class="num">1.000</td><td class="num">114</td></tr>
+        <tr><td class="num">6</td><td class="num">0.11</td><td class="num">0.0056</td><td class="num">1.000</td><td class="num">162</td></tr>
+        <tr><td class="num">9</td><td class="num">0.07</td><td class="num">0.0038</td><td class="num">1.000</td><td class="num">208</td></tr>
+        <tr><td class="num">11</td><td class="num">0.13</td><td class="num">0.0066</td><td class="num">1.000</td><td class="num">250</td></tr>
+      </table></div>
+    </details>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Intelligence that survives its model</h2>
+      <span class="sec-note">real-R5 · head state transported v1 → v2 · EMPIRICAL-NEURAL, never claimed exact</span>
+    </div>
+    <p class="lede">
+      The head state built on backbone v1 crosses a representation bridge to an independently
+      pretrained, narrower backbone v2 — recovering <strong>78%</strong> of the gap between a cold
+      reset and full raw-data retraining, using only a public anchor set. Bridge residual 0.603, reported.
+    </p>
+    <div class="card">
+      <h3>Accuracy on backbone v2</h3>
+      <div class="sub">AG News test · the raw data is gone; only the state travels</div>
+      <div class="chart-wrap"><div id="ch-mig"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Both experimental programs</h2>
+      <span class="sec-note">python -m rtlm_n.benchmarks.run_all · python -m rtlm_n.benchmarks.real_agnews</span>
+    </div>
+    <div class="tbl-wrap"><table>
+      <tr><th>#</th><th>experiment</th><th>guarantee</th><th>headline evidence</th></tr>
+      <tr><td class="num">0</td><td>Exact frozen head</td><td><span class="chip exact">EXACT-FROZEN</span></td><td>distributed ≡ centralized ~1e-11 · deletion exact · 29× compression</td></tr>
+      <tr><td class="num">1</td><td>Teacher-residual distillation</td><td><span class="chip exact">EXACT-FROZEN</span></td><td>≡ centralized distillation · beats FedAvg under non-IID</td></tr>
+      <tr><td class="num">2</td><td>Canonical low-rank adapter</td><td><span class="chip exact">EXACT-FROZEN</span></td><td>merged C ≡ centralized (1e-15) · misaligned averaging 0.75 → canonical 0.99</td></tr>
+      <tr><td class="num">3</td><td>Projected Jacobian</td><td><span class="chip lin">LINEARIZED-BOUNDED</span></td><td>6× logit fidelity vs any output head · error measured</td></tr>
+      <tr><td class="num">4</td><td>One state, 1,000 models</td><td><span class="chip exact">EXACT-FROZEN</span></td><td>zero representation passes · ~980× less compute</td></tr>
+      <tr><td class="num">5</td><td>Continual accretion</td><td><span class="chip emp">EMPIRICAL-NEURAL</span></td><td>escalation 0.37→0.13 · 7.7× verified outcomes/joule</td></tr>
+      <tr><td class="num">6</td><td>Heterogeneous edges</td><td><span class="chip exact">EXACT-FROZEN</span></td><td>fp64 subset stays exact · fp32 deviation declared (5e-4)</td></tr>
+      <tr><td class="num">7</td><td>Backbone migration</td><td><span class="chip emp">EMPIRICAL-NEURAL</span></td><td>87% of reset→retrain gap recovered</td></tr>
+      <tr><td class="num">R0–R5</td><td>Real-data program — AG News, torch, Adam baselines, measured cpu-s</td><td><span class="chip exact">6/6 PASS</span></td><td>everything above re-proven on real text with real competitors</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>The 15 non-negotiable pass gates</h2>
+      <span class="sec-note">asserted by 39 tests · pytest, all green</span>
+    </div>
+    <div class="gates">
+      <div class="gate"><span class="no">01</span>Exact frozen-feature equivalence, arbitrary partitions<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">02</span>Compact state travels — never raw records or checkpoints<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">03</span>One state materializes many models<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">04</span>Beats naive adapter averaging under non-IID<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">05</span>Incompatible basis versions refused<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">06</span>Every non-exact surface reports its error<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">07</span>Deletion rematerializes the retained model exactly<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">08</span>An internal surface improves beyond the output head<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">09</span>Multi-model compute below independent fine-tuning<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">10</span>Continual inference reduces large-model escalation<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">11</span>Lifetime energy savings exceed learning cost<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">12</span>Verified outcomes per joule beats baselines<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">13</span>Unsafe numerics return UNSUPPORTED<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">14</span>Migration never called exact without proof<span class="ok">✓ PASS</span></div>
+      <div class="gate"><span class="no">15</span>Mutation tests catch merge/deletion/basis/proof defects<span class="ok">✓ PASS</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Repository <code>tonyvone/rtlmai</code> · branch <code>claude/rtlm-n-neural-intelligence-kcoezs</code> ·
+      reproduce with <code>pip install -e .[real,dev] &amp;&amp; pytest &amp;&amp; python -m rtlm_n.benchmarks.real_agnews</code>
+    </p>
+    <p>
+      Honesty notes: real-data backbones are small transformers MLM-pretrained on the AG News corpus itself
+      (checkpoint hosts unreachable from the build environment; an HF-checkpoint wrapper ships ready).
+      Energy is measured process cpu-seconds at an explicit watts constant; RAPL is used where exposed.
+      Exactness claims hold for declared frozen/linearized objectives — nothing implies more than its
+      guarantee class.
+    </p>
+  </footer>
+</div>
+
+<div id="tip" role="presentation"></div>
+
+<script>
+(function () {
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const tip = document.getElementById("tip");
+  function bindTips(root) {
+    root.querySelectorAll("[data-tip]").forEach((el) => {
+      el.addEventListener("mousemove", (e) => {
+        tip.textContent = el.getAttribute("data-tip");
+        tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 180) + "px";
+        tip.style.top = (e.clientY - 34) + "px";
+        tip.style.opacity = "1";
+      });
+      el.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
+    });
+  }
+
+  // ---- horizontal bar chart -------------------------------------------
+  function hbar(id, rows, xmax, fmt) {
+    const W = 470, LB = 148, RB = 52, BH = 18, GAP = 10;
+    const H = rows.length * (BH + GAP) + 8;
+    const px = (v) => (v / xmax) * (W - LB - RB);
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img">`;
+    rows.forEach((r, i) => {
+      const y = 4 + i * (BH + GAP);
+      const w = Math.max(px(r.v), 2);
+      const col = r.hot ? css("--accent") : css("--baseline");
+      s += `<text x="${LB - 8}" y="${y + BH - 5}" text-anchor="end" font-size="11" fill="${css("--ink-2")}">${r.k}</text>`;
+      s += `<rect x="${LB}" y="${y}" width="${w}" height="${BH}" rx="4" fill="${col}" data-tip="${r.k}: ${fmt(r.v)}"></rect>`;
+      s += `<text x="${LB + w + 7}" y="${y + BH - 5}" font-size="11" font-weight="600" fill="${css("--ink")}">${fmt(r.v)}</text>`;
+    });
+    s += "</svg>";
+    const el = document.getElementById(id);
+    el.innerHTML = s;
+    bindTips(el);
+  }
+
+  // ---- line chart ------------------------------------------------------
+  function line(id, ys, ymax, fmt, xlabel) {
+    const W = 470, H = 170, L = 46, R = 14, T = 12, B = 26;
+    const pw = W - L - R, ph = H - T - B;
+    const X = (i) => L + (i / (ys.length - 1)) * pw;
+    const Y = (v) => T + ph - (v / ymax) * ph;
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img">`;
+    [0, 0.5, 1].forEach((f) => {
+      const y = T + ph - f * ph;
+      s += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}" stroke="${css("--grid")}" stroke-width="1"></line>`;
+      s += `<text x="${L - 7}" y="${y + 4}" text-anchor="end" font-size="10" fill="${css("--ink-3")}">${fmt(f * ymax)}</text>`;
+    });
+    const pts = ys.map((v, i) => `${X(i)},${Y(v)}`).join(" ");
+    s += `<polyline points="${L},${T + ph} ${pts} ${W - R},${T + ph}" fill="${css("--accent-soft")}" stroke="none"></polyline>`;
+    s += `<polyline points="${pts}" fill="none" stroke="${css("--accent")}" stroke-width="2" stroke-linejoin="round"></polyline>`;
+    ys.forEach((v, i) => {
+      const last = i === ys.length - 1;
+      s += `<circle cx="${X(i)}" cy="${Y(v)}" r="${last ? 4.5 : 3.5}" fill="${last ? css("--accent") : css("--panel")}"
+             stroke="${css("--accent")}" stroke-width="2" data-tip="window ${i}: ${fmt(v)}"></circle>`;
+      if (i === 0 || last)
+        s += `<text x="${X(i) + (i === 0 ? 8 : 0)}" y="${Y(v) - 9}" text-anchor="${i === 0 ? "start" : "middle"}" font-size="10.5" font-weight="700" fill="${css("--ink")}">${fmt(v)}</text>`;
+    });
+    s += `<text x="${L}" y="${H - 6}" font-size="10" fill="${css("--ink-3")}">window 0</text>`;
+    s += `<text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="10" fill="${css("--ink-3")}">${xlabel}</text>`;
+    s += "</svg>";
+    const el = document.getElementById(id);
+    el.innerHTML = s;
+    bindTips(el);
+  }
+
+  // ---- migration ladder ------------------------------------------------
+  function ladder(id) {
+    const W = 940, H = 120, L = 30, R = 30, y = 58, x0 = 0.15, x1 = 0.65;
+    const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R);
+    const pts = [
+      { k: "cold reset", v: 0.229, col: css("--baseline") },
+      { k: "transported state", v: 0.500, col: css("--accent") },
+      { k: "retrain upper bound", v: 0.578, col: css("--ink-3") },
+    ];
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img">`;
+    s += `<line x1="${X(0.19)}" y1="${y}" x2="${X(0.63)}" y2="${y}" stroke="${css("--grid")}" stroke-width="2"></line>`;
+    s += `<rect x="${X(0.229)}" y="${y - 3}" width="${X(0.5) - X(0.229)}" height="6" rx="3" fill="${css("--accent-soft")}"></rect>`;
+    pts.forEach((p) => {
+      s += `<circle cx="${X(p.v)}" cy="${y}" r="8" fill="${p.col}" stroke="${css("--panel")}" stroke-width="2" data-tip="${p.k}: ${p.v.toFixed(3)}"></circle>`;
+      s += `<text x="${X(p.v)}" y="${y - 18}" text-anchor="middle" font-size="12" font-weight="700" fill="${css("--ink")}">${p.v.toFixed(3)}</text>`;
+      s += `<text x="${X(p.v)}" y="${y + 30}" text-anchor="middle" font-size="10.5" fill="${css("--ink-2")}">${p.k}</text>`;
+    });
+    s += `<text x="${X(0.365)}" y="${y + 48}" text-anchor="middle" font-size="10.5" fill="${css("--accent")}" font-weight="700">78% of the gap recovered — no raw data</text>`;
+    s += "</svg>";
+    const el = document.getElementById(id);
+    el.innerHTML = s;
+    bindTips(el);
+  }
+
+  function render() {
+    hbar("ch-acc", [
+      { k: "RTLM-N state", v: 0.750, hot: true },
+      { k: "Centralized LoRA", v: 0.742 },
+      { k: "Base head (400)", v: 0.663 },
+      { k: "FedAvg heads", v: 0.557 },
+      { k: "Federated LoRA", v: 0.538 },
+    ], 0.8, (v) => v.toFixed(3));
+    hbar("ch-cpu", [
+      { k: "RTLM-N state", v: 0.10, hot: true },
+      { k: "Centralized LoRA", v: 1.78 },
+      { k: "Base head (400)", v: 0.0 },
+      { k: "FedAvg heads", v: 3.97 },
+      { k: "Federated LoRA", v: 4.67 },
+    ], 5, (v) => v ? v.toFixed(2) + " s" : "—");
+    line("ch-esc", [0.37,0.11,0.12,0.11,0.09,0.10,0.11,0.12,0.09,0.07,0.13,0.13], 0.4,
+         (v) => v.toFixed(2), "window 11");
+    line("ch-joule", [0.0184,0.0053,0.0063,0.0056,0.0044,0.0050,0.0056,0.0059,0.0047,0.0038,0.0066,0.0066], 0.02,
+         (v) => v.toFixed(3), "window 11");
+    ladder("ch-mig");
+  }
+  render();
+  new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+})();
+</script>
