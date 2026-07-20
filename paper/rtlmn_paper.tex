@@ -1,0 +1,452 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1.1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{microtype}
+
+\newtheorem{proposition}{Proposition}
+\newcommand{\bH}{\mathbf{H}}
+\newcommand{\bR}{\mathbf{R}}
+\newcommand{\bG}{\mathbf{G}}
+\newcommand{\bg}{\mathbf{g}}
+\newcommand{\bh}{\mathbf{h}}
+\newcommand{\bW}{\mathbf{W}}
+\newcommand{\bC}{\mathbf{C}}
+\newcommand{\bJ}{\mathbf{J}}
+
+\title{Neural Intelligence States: Exactly Mergeable Evidence\\
+Replaces Trained-Adapter Averaging for\\
+Compute-Efficient Distributed Adaptation}
+
+\author{Draft --- set author list before submission\\
+\small Code and all measurements: \texttt{github.com/tonyvone/rtlmai}}
+\date{July 2026 --- preprint draft}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Distributed adaptation of foundation models today means independently
+training low-rank adapters and averaging them---an approach that suffers
+from geometric misalignment between per-client subspaces, pays a full
+optimization run per model variant, and offers neither exact deletion nor
+forgetting-free incremental updates. We propose \emph{neural intelligence
+states} (RTLM-N): instead of communicating trained weights, every node
+accumulates \emph{sufficient-statistic evidence} for adaptation
+coordinates in a globally shared canonical basis anchored to a frozen
+backbone. States merge by addition---exactly, in any order---and models
+are \emph{materialized} from the merged state by regularized linear
+solves. We show how to choose the shared basis (the optimal linear
+correction has rank at most the output dimension, spanned by a
+feature--residual cross-covariance computable on public calibration
+data), how to reach nonlinear internal surfaces via distributed iterated
+Gauss--Newton with per-round exact merging and measured linearization
+error, and how the same algebra yields three properties no
+trajectory-based method offers together: learning cost proportional to
+\emph{new} data, zero forgetting, and exact machine unlearning by
+subtraction. On real text classification with genuinely Adam-trained
+competitors, canonical states score $0.750$ versus $0.538$ for federated
+LoRA under severe non-IID skew at $46\times$ less measured compute;
+1{,}000 model variants materialize from one state at $215\times$ less
+measured compute than per-variant training; iterated Gauss--Newton
+reaches within $4.5$ points of full backpropagation on an internal-only
+adaptation task from a $48$-coordinate mergeable subspace; and a learning
+inference cascade cuts energy per task $2.6\times$ within a single
+workload as teacher escalations decline. Every result carries an explicit
+guarantee class, and every number is reproducible from the released code.
+\end{abstract}
+
+\section{Introduction}
+
+The economics of adapting foundation models are dominated by a structural
+choice: learning is stored in \emph{trained weights}, produced by
+optimization trajectories over data. This choice taxes every downstream
+need. Producing $M$ tenant- or domain-specialized variants costs $M$
+training runs. Keeping a deployed model current under drift costs either
+a replay over all accumulated history or an incremental fine-tune that
+forgets. Honoring a deletion request costs a retraining campaign or an
+approximation. Federating adaptation across data silos costs quality:
+independently trained low-rank adapters live in misaligned subspaces, and
+averaging them interferes destructively.
+
+We revisit an older statistical idea---sufficient statistics---in the
+setting of frozen deep representations, and develop it into a complete
+distributed learning system. The central object is a \emph{neural
+intelligence state}: a compact set of Gram and cross-moment accumulators,
+expressed in a canonical coordinate system shared by all nodes, from
+which models are \emph{solved} rather than trained. Because the state is
+a sum, its algebra is exact: merging is associative, commutative, and
+order-free; deleting a contributor is a subtraction; and materialization
+depends only on the totals, never on how many raw examples produced them
+or in what order they arrived.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item \textbf{Canonical evidence states.} We replace
+  independently-optimized adapters with per-node sufficient statistics
+  for coordinates in a globally fixed adaptation basis
+  ($\Delta\bW=\mathbf{U}\bC\mathbf{V}^\top$ with $\mathbf{U},\mathbf{V}$
+  shared), and prove exact centralized equivalence for frozen-feature
+  surfaces under arbitrary partitions, merge orders, and deletions
+  (Prop.~\ref{prop:exact}; measured deviation $\sim\!10^{-10}$ on real
+  features).
+  \item \textbf{Principled basis selection.} We show the optimal linear
+  correction has rank at most the output dimension and characterize its
+  input subspace via a feature--residual cross-covariance
+  (Prop.~\ref{prop:subspace}), yielding a data-aware shared basis
+  computable from a small public calibration set. This choice is
+  decisive in practice: random shared bases lose to learned-subspace
+  LoRA, while cross-covariance bases match or beat it.
+  \item \textbf{Distributed iterated Gauss--Newton.} To adapt
+  \emph{internal} transformer surfaces beyond the one-shot linearization
+  band, we iterate: re-linearize at the current coordinates, accumulate
+  fresh Jacobian evidence, merge exactly within the round, and take a
+  Levenberg--Marquardt damped step, reporting the measured linearization
+  error every round. States from different linearization points are
+  never merged---a claim-discipline rule enforced by construction.
+  \item \textbf{The incrementality trio.} The state algebra provides,
+  simultaneously: learning cost $O(\text{new data})$ per refresh, zero
+  forgetting (bit-identical to full retraining at every step), and exact
+  unlearning by subtraction. We measure all three against replay
+  retraining and warm-start SGD under distribution drift.
+  \item \textbf{A learning inference cascade.} Escalations to a large
+  verified teacher are absorbed into the state as residual evidence, so
+  the escalation rate is a declining curve rather than a routing
+  constant; we measure declining teacher usage and energy per task at
+  stable quality, and project fleet-scale energy with all assumptions
+  declared.
+\end{enumerate}
+
+Everything is released: a NumPy reference implementation, a PyTorch
+backbone with exact autograd Jacobians, sixteen machine-checked
+experiments, and per-claim guarantee labels
+(\textsc{exact-frozen} / \textsc{linearized-bounded} /
+\textsc{sketched-bounded} / \textsc{empirical-neural} /
+\textsc{unsupported}).
+
+\section{Related Work}
+
+\textbf{Federated learning and adapter merging.} FedAvg
+\citep{mcmahan2017} averages locally trained weights; federated variants
+of LoRA \citep{hu2022lora} inherit the misalignment problem of averaging
+independently learned low-rank factors, as do post-hoc merging methods
+such as task arithmetic \citep{ilharco2023}, model soups
+\citep{wortsman2022}, and Fisher-weighted averaging
+\citep{matena2022}. Our approach differs in kind: nodes never train or
+transmit weights; they transmit evidence in a shared coordinate system,
+and the server solves. One-shot federated learning via distillation
+\citep{guha2019} shares the single-round goal but not the exactness.
+
+\textbf{Machine unlearning.} Exact unlearning generally requires
+retraining or sharded architectures \citep{bourtoule2021}; certified
+removal for linear models \citep{guo2020} is the closest antecedent to
+our deletion property. We extend exact removal to a fully distributed,
+mergeable, multi-surface setting with lineage and audit.
+
+\textbf{Continual learning.} Regularization methods such as EWC
+\citep{kirkpatrick2017} mitigate but do not eliminate forgetting. For
+supported surfaces our updates are exactly equivalent to retraining on
+the union of all data, so forgetting is structurally impossible rather
+than penalized.
+
+\textbf{Linearized and second-order methods.} Our internal-surface
+machinery builds on Gauss--Newton and natural-gradient approximations
+\citep{martens2015} and on the linearization perspective of the NTK
+\citep{jacot2018}; the trust-region damping is classical
+Levenberg--Marquardt \citep{marquardt1963}. The novelty is the
+distributed sufficient-statistic formulation with exact per-round
+merging and enforced per-round error reporting.
+
+\textbf{Cascades, distillation, and efficiency.} Knowledge distillation
+\citep{hinton2015} transfers teacher behavior once; inference cascades
+route between models. Our cascade \emph{accumulates}: escalations become
+permanent state, addressing the energy concerns raised for large-scale
+ML \citep{strubell2019,schwartz2020,patterson2021}. Linear probes on
+frozen representations \citep{alain2017} underpin why the exact regime
+is practically useful and should become more so as backbones improve.
+
+\section{Method}
+
+\subsection{Canonical evidence states}
+Let a frozen backbone produce representations $\bh=f_\theta(x)\in
+\mathbb{R}^d$, and let adaptation live in a globally shared basis:
+head updates $\bW=\bW_0+\mathbf{U}\bC\mathbf{V}^\top$ with
+$\mathbf{U}\in\mathbb{R}^{k\times r_u}$,
+$\mathbf{V}\in\mathbb{R}^{d\times r_v}$ fixed and identical on every
+node, or generally $\Delta\theta=\mathbf{P}c$. For frozen-feature
+surfaces node $i$ accumulates
+\begin{equation}
+\bH_i=\textstyle\sum_j \bh_j\bh_j^\top,\qquad
+\bR_i=\textstyle\sum_j \bh_j r_j^\top,
+\end{equation}
+where $r_j$ is a target, teacher residual, or verified outcome; for
+low-rank surfaces the same moments in coordinates
+$z=\mathbf{V}^\top\bh$, $e_U=\mathbf{U}^\top(y-\bW_0\bh)$. The global
+state is the sum over nodes, and materialization is a ridge solve,
+$\bW^\ast=(\bH+\lambda I)^{-1}\bR$. States carry a content hash, an HMAC
+signature, contributor lineage (for duplicate rejection), event
+commitments (for audited deletion), and a guarantee class; merging
+incompatible bases, backbones, or objectives is refused.
+
+\begin{proposition}[Exactness and invariance]\label{prop:exact}
+For a declared frozen representation and ridge objective, materialization
+from the merged state equals centralized training on the pooled raw data,
+for every partition of the data across nodes and every merge order; and
+removing a contributor's state yields exactly the centralized solution on
+the retained data.
+\end{proposition}
+\begin{proof}
+$\bH,\bR$ are sums of per-example terms, so any partition and order
+yields the same totals; the strictly convex objective has a unique
+minimizer depending only on those totals. Removal subtracts exactly the
+removed examples' terms.
+\end{proof}
+
+\subsection{Choosing the shared basis}\label{sec:basis}
+The choice of $\mathbf{U},\mathbf{V}$ decides whether the constrained
+space can express the needed correction.
+
+\begin{proposition}[Optimal correction subspace]\label{prop:subspace}
+Let $\Delta\bW^\ast=\arg\min_{\Delta\bW}\sum_j\|y_j-(\bW_0+\Delta\bW)
+\bh_j\|^2+\lambda\|\Delta\bW\|_F^2$. Then
+$\Delta\bW^\ast=(\bH+\lambda I)^{-1}\bC_{xy}$ with
+$\bC_{xy}=\sum_j\bh_j e_j^\top$, $e_j=y_j-\bW_0\bh_j$; in particular
+$\operatorname{rank}(\Delta\bW^\ast)\le k$ and its input subspace is
+spanned by the columns of $(\bH+\lambda I)^{-1}\bC_{xy}$.
+\end{proposition}
+
+Thus a rank-$k$ shared input basis suffices in principle. We estimate it
+from a small \emph{public} calibration set: leading directions from the
+SVD of $\bC_{xy}$ (a preconditioner-free surrogate), padded with top
+activation-variance directions and orthonormalized. Empirically this is
+the difference between losing and winning against learned-subspace LoRA
+(\S\ref{sec:exp-fed}).
+
+\subsection{Internal surfaces: distributed iterated Gauss--Newton}
+For an internal surface (e.g., a transformer MLP weight,
+$\Delta\bW_1=\mathbf{U}\bC\mathbf{V}^\top$), the network is linearized in
+the canonical coordinates: with
+$\bJ(x)=\partial f/\partial c$ (computed exactly by autograd), nodes
+accumulate $\bG_i=\sum\bJ^\top\bJ$, $\bg_i=\sum\bJ^\top r$, and the
+merged state yields $c^\ast=(\bG+\lambda I)^{-1}\bg$
+(\textsc{linearized-bounded}, with the linearization error measured on a
+probe set and attached to the artifact). One-shot solves are confined to
+a band around the reference model. We therefore iterate: at round $t$,
+every node re-linearizes at the current $c_t$, fresh evidence is
+accumulated and merged exactly \emph{within the round}, and a damped step
+is taken with $\lambda_{\mathrm{eff}}=\lambda+\mu\,\mathrm{tr}(\bG)/
+\dim(c)$ (Levenberg--Marquardt). Rounds are distinct objectives; states
+from different linearization points are never merged. Communication per
+round is one compact state per node.
+
+\subsection{Materialization, accretion, and migration}
+\textbf{Factory.} One merged state materializes arbitrarily many
+variants---regularization sweeps, tenant or geography slices via the
+state algebra, contributor exclusions, reduced-rank power-budget
+variants (exact sub-solves in leading canonical coordinates), and
+quantized models (guarantee demoted accordingly)---with no access to raw
+data and no representation passes.
+\textbf{Cascade.} A small edge model answers first; a verifier gates on
+confidence; failures escalate to a large verified teacher whose response
+is folded into the state as residual evidence; the correction
+rematerializes periodically.
+\textbf{Migration.} When the backbone changes, a linear representation
+bridge fit on public anchors transports heads
+($\bW'=\mathbf{B}\bW$) or states
+($\bH'=\mathbf{B}^\top\bH\mathbf{B}$); transported objects are labeled
+\textsc{empirical-neural}, carry the measured bridge residual, and are
+never claimed exact.
+
+\section{Experiments}\label{sec:exp}
+
+\textbf{Setup and scope.} We evaluate on AG News \citep{zhang2015}
+(120k real news texts, 4 classes) with transformer backbones
+MLM-pretrained on the task corpus and then frozen (the build environment
+cannot reach pretrained-checkpoint hosts; the released code includes a
+HuggingFace wrapper exposing identical interfaces). All baselines that
+claim SGD are genuinely trained with Adam, including backpropagation
+through the backbone for internal LoRA. Compute is measured process
+CPU-seconds; energy is CPU-seconds at a declared wattage (RAPL where
+exposed). A NumPy reference program reproduces every algebraic claim
+independently of PyTorch. We report the guarantee class with every
+number.
+
+\subsection{Exactness on real representations}
+Across 10 nodes under severe label skew (Dirichlet $\alpha{=}0.1$),
+arbitrary merge orders, node removal, and event deletion, merged-state
+materialization matches centralized ridge training to a maximum
+deviation of $2\times10^{-10}$ on real MLM features
+(\textsc{exact-frozen}); state size is $O(d^2)$, independent of the
+number of examples ($29\times$ smaller than the raw data in the
+reference configuration, and constant as data grows).
+
+\subsection{Canonical states vs.\ federated adaptation}\label{sec:exp-fed}
+Eight non-IID nodes ($\alpha{=}0.1$), identical frozen features for all
+methods, one-hot targets, accuracy on a held-out test set:
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Method & Accuracy & Measured cpu-s \\
+\midrule
+Base head (400 labels) & 0.663 & --- \\
+Federated LoRA (Adam, per-node subspaces, averaged) & 0.538 & 4.67 \\
+One-shot FedAvg heads (Adam, averaged) & 0.557 & 3.97 \\
+Centralized LoRA (Adam, all data) & 0.742 & 1.78 \\
+\textbf{Canonical evidence state (merged, solved)} & \textbf{0.750} & \textbf{0.10} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The shared basis matters: with random shared directions the canonical
+state scores only $0.462$--$0.475$; with the cross-covariance basis of
+\S\ref{sec:basis} it beats even centralized SGD LoRA at $46\times$ less
+measured compute, while remaining one-shot, mergeable, and deletable. In
+a controlled reference experiment where the true correction lies in the
+canonical space, averaging adapters trained in per-node misaligned bases
+scores $0.745$ versus $0.990$ for canonical merging---the geometric
+interference failure reproduced and then removed.
+
+\subsection{One state, one thousand models}
+From a single merged state we materialize $1{,}000$ variants
+(regularization sweeps $\times$ contributor exclusions $\times$
+quantization) in $7.8$ measured cpu-s with zero representation passes,
+versus $\sim\!1{,}675$ cpu-s for per-variant SGD training:
+$\mathbf{215\times}$ (\textsc{exact-frozen}). Excluded-contributor
+variants are bit-identical to retraining without that contributor.
+
+\subsection{Internal adaptation: iterated Gauss--Newton vs.\ backprop}
+Internal MLP adapter only, head fixed, six non-IID nodes:
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Method & Accuracy \\
+\midrule
+Fixed head, no adapter (floor) & 0.566 \\
+Federated internal LoRA (Adam, backprop, averaged) & 0.648 \\
+One-shot Gauss--Newton state & 0.666 \\
+\textbf{Iterated Gauss--Newton (3 rounds)} & \textbf{0.710} \\
+Centralized internal LoRA (Adam, backprop) & 0.755 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Iteration escapes the one-shot band with per-round linearization errors
+$0.26\!\to\!0.14$ (measured, attached). A fixed $48$-coordinate mergeable
+subspace closes to within $4.5$ points of $1{,}536$ freely-trained
+parameters, and beats the federated version of the real thing. Honest
+cost: Jacobian accumulation makes our method $\sim\!4\times$ more
+expensive in cpu-s than SGD at this scale---the trade is compute for
+exact mergeability.
+
+\subsection{Incrementality: $O(\mathrm{new})$, zero forgetting, exact deletion}
+Six periods of drifting data ($70\%$ class skew per period). The
+incremental state (i) stays bit-identical to full retraining at every
+period (max deviation $6\times10^{-11}$); (ii) cannot forget, while
+warm-start SGD on new data collapses to $0.482$ vs $0.770$; (iii) keeps
+per-period cost flat ($\times1.6$ over six periods) while replay
+retraining grows $\times6.0$, for a cumulative measured advantage of
+$3.4\times$ and diverging; and (iv) deletes a mid-stream contributor by
+subtraction at $269\times$ less cost than replay-without-the-data,
+exactly. No trajectory-based method in the comparison offers more than
+two of these four properties at once.
+
+\subsection{Continual inference accretion}
+Feeding a repeated workload through the cascade, teacher escalation
+declines $0.37\!\to\!0.13$ at quality $1.000$ (reference program;
+$0.36\!\to\!0.30$ with quality $0.62\!\to\!0.86$ on real text), and
+measured energy per accepted task falls $0.018\!\to\!0.007$\,J,
+yielding $7.7\times$ verified outcomes per joule versus teacher-always.
+A fleet-scale projection composing these measured micro-costs with a
+declared workload model (labeled simulation) indicates $-81\%$ lifetime
+energy versus teacher-always and $-51\%$ versus a tuned static cascade
+over 24 months, with backbone upgrades absorbed by state migration
+(below).
+
+\subsection{Backbone migration}
+Transporting the head state to an independently pretrained,
+narrower backbone through a bridge fit on 600 public anchors recovers
+$78\%$ of the cold-reset$\to$full-retrain gap
+(reset $0.229$, transported $0.500$, retrain $0.578$;
+bridge residual $0.603$ reported; \textsc{empirical-neural}).
+
+\section{Limitations}
+All results use small backbones pretrained on the task corpus; scale is
+untested (though the mechanism should benefit from stronger
+representations, which capture more of downstream adaptation linearly).
+Evidence is classification/scoring-shaped; generative tasks are
+untouched. Energy is measured CPU-time at declared wattage, not wall
+power; the fleet projection is a simulation and labeled as such.
+Migration is empirical. Byzantine-robust aggregation of validly signed
+but malicious statistics is future work. Exactness claims hold only for
+the declared frozen or linearized objectives---never for unrestricted
+end-to-end training.
+
+\section{Conclusion}
+Replacing trained-adapter communication with exactly mergeable evidence
+in a shared canonical basis turns distributed adaptation from an
+optimization problem into an algebra: models become cheap materialized
+views of a durable intelligence state that grows by addition, forgets
+nothing, deletes exactly, iterates to near-backprop quality on internal
+surfaces, and progressively transfers inference from large central
+models to small edge models. The measured savings are one to two orders
+of magnitude on the adaptation side and compounding on the serving side.
+The decisive open test---identical machinery on large pretrained
+backbones---requires only a representation extractor swap, which the
+released code already supports.
+
+\begin{thebibliography}{99}
+\bibitem[Alain \& Bengio(2017)]{alain2017} G.~Alain and Y.~Bengio.
+Understanding intermediate layers using linear classifier probes.
+\emph{ICLR Workshop}, 2017.
+\bibitem[Bourtoule et al.(2021)]{bourtoule2021} L.~Bourtoule et al.
+Machine unlearning. \emph{IEEE S\&P}, 2021.
+\bibitem[Guha et al.(2019)]{guha2019} N.~Guha, A.~Talwalkar, and
+V.~Smith. One-shot federated learning. \emph{arXiv:1902.11175}, 2019.
+\bibitem[Guo et al.(2020)]{guo2020} C.~Guo, T.~Goldstein, A.~Hannun, and
+L.~van~der~Maaten. Certified data removal from machine learning models.
+\emph{ICML}, 2020.
+\bibitem[Hinton et al.(2015)]{hinton2015} G.~Hinton, O.~Vinyals, and
+J.~Dean. Distilling the knowledge in a neural network.
+\emph{arXiv:1503.02531}, 2015.
+\bibitem[Hu et al.(2022)]{hu2022lora} E.~Hu et al. LoRA: Low-rank
+adaptation of large language models. \emph{ICLR}, 2022.
+\bibitem[Ilharco et al.(2023)]{ilharco2023} G.~Ilharco et al. Editing
+models with task arithmetic. \emph{ICLR}, 2023.
+\bibitem[Jacot et al.(2018)]{jacot2018} A.~Jacot, F.~Gabriel, and
+C.~Hongler. Neural tangent kernel: convergence and generalization in
+neural networks. \emph{NeurIPS}, 2018.
+\bibitem[Kirkpatrick et al.(2017)]{kirkpatrick2017} J.~Kirkpatrick et
+al. Overcoming catastrophic forgetting in neural networks.
+\emph{PNAS}, 2017.
+\bibitem[Marquardt(1963)]{marquardt1963} D.~Marquardt. An algorithm for
+least-squares estimation of nonlinear parameters. \emph{SIAM J.\ Appl.\
+Math.}, 1963.
+\bibitem[Martens \& Grosse(2015)]{martens2015} J.~Martens and R.~Grosse.
+Optimizing neural networks with Kronecker-factored approximate
+curvature. \emph{ICML}, 2015.
+\bibitem[Matena \& Raffel(2022)]{matena2022} M.~Matena and C.~Raffel.
+Merging models with Fisher-weighted averaging. \emph{NeurIPS}, 2022.
+\bibitem[McMahan et al.(2017)]{mcmahan2017} B.~McMahan et al.
+Communication-efficient learning of deep networks from decentralized
+data. \emph{AISTATS}, 2017.
+\bibitem[Patterson et al.(2021)]{patterson2021} D.~Patterson et al.
+Carbon emissions and large neural network training.
+\emph{arXiv:2104.10350}, 2021.
+\bibitem[Schwartz et al.(2020)]{schwartz2020} R.~Schwartz, J.~Dodge,
+N.~Smith, and O.~Etzioni. Green AI. \emph{CACM}, 2020.
+\bibitem[Strubell et al.(2019)]{strubell2019} E.~Strubell, A.~Ganesh,
+and A.~McCallum. Energy and policy considerations for deep learning in
+NLP. \emph{ACL}, 2019.
+\bibitem[Wortsman et al.(2022)]{wortsman2022} M.~Wortsman et al. Model
+soups: averaging weights of multiple fine-tuned models improves accuracy
+without increasing inference time. \emph{ICML}, 2022.
+\bibitem[Zhang et al.(2015)]{zhang2015} X.~Zhang, J.~Zhao, and Y.~LeCun.
+Character-level convolutional networks for text classification.
+\emph{NeurIPS}, 2015.
+\end{thebibliography}
+
+\end{document}
